@@ -1,0 +1,63 @@
+name: Feature request
+description: Suggest a new tool or an improvement. / Đề xuất tool mới hoặc cải tiến.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Write in English or Vietnamese — both are fine. / Viết tiếng Anh hay tiếng Việt đều được.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which area?
+      options:
+        - Surfaces
+        - Alignments and profiles
+        - Corridors and cross sections
+        - Exporting data
+        - install.py / configuration
+        - Documentation
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: >
+        Describe the real survey or design task, not just the COM call you have in
+        mind. The quantity you need out at the end usually decides the right tool
+        shape.
+    validations:
+      required: true
+
+  - type: textarea
+    id: today
+    attributes:
+      label: How do you do it today?
+      description: >
+        Is there an existing tool that gets close? `send_civil3d_command` is the
+        escape hatch — does it cover the case, and if not, what breaks?
+    validations:
+      required: true
+
+  - type: textarea
+    id: com-evidence
+    attributes:
+      label: Is it reachable over COM?
+      description: >
+        Several natural requests are blocked by the API itself, not by this server
+        (see Known limits). If you have checked the type library or tried the call,
+        paste what happened — that evidence is the most useful part of the report,
+        and it is what decides whether the tool can exist at all.
+      render: text
+
+  - type: textarea
+    id: verification
+    attributes:
+      label: How would the result be checked?
+      description: >
+        Every tool here verifies its own writes by reading them back, and every
+        test fixture has an answer computable by hand. If you can name the geometry
+        whose answer you already know, it usually becomes the test.

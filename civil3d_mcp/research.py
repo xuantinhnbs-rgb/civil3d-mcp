@@ -345,13 +345,27 @@ def export_sections_csv(client: Civil3DClient, alignment: str, group: str,
         ["ly_trinh", "be_mat", "offset", "cao_do"],
         ([r["station"], r["surface"], r["offset"], r["elevation"]] for r in data["rows"]),
     )
+    # Nhóm sample line lấy mẫu N bề mặt thì CSV phải có đủ N tên bề mặt. Đếm số dòng
+    # KHÔNG phát hiện được việc mất trọn một bề mặt: file vẫn đầy dòng và vẫn đúng
+    # định dạng, chỉ thiếu một nửa nội dung. Vì vậy phép kiểm chứng ở đây đối chiếu
+    # danh sách bề mặt có dữ liệu với danh sách bề mặt mà nhóm khai báo lấy mẫu.
+    sampled = cor_mod.sampled_surface_names(client, alignment, group)
+    with_data = list(data.get("surfaces_with_data") or [])
+    missing = [n for n in sampled if n not in with_data]
     return {
         "alignment": alignment,
         "group": group,
         "sample_lines_read": data["sample_lines_read"],
+        "surfaces_sampled_by_group": sampled,
+        "surfaces_with_data": with_data,
+        "surfaces_missing_from_export": missing,
+        "rows_by_surface": data.get("rows_by_surface"),
+        "sections_skipped": data.get("sections_skipped"),
+        "sections_skipped_by_surface": data.get("sections_skipped_by_surface"),
         "file": written,
-        "verified": written["rows_written"] > 0,
-        "verified_by": "đếm số dòng đã ghi và kích thước file trên đĩa",
+        "verified": written["rows_written"] > 0 and not missing,
+        "verified_by": ("đếm số dòng đã ghi VÀ đối chiếu danh sách bề mặt có dữ liệu "
+                        "với danh sách bề mặt nhóm khai báo lấy mẫu"),
     }
 
 
@@ -400,7 +414,7 @@ def export_corridor_quantities(client: Civil3DClient, corridor: str, out_dir: st
 
     stations = sorted(by_station)
     codes = sorted({c for st in by_station.values() for c in st})
-    volumes = {c: 0.0 for c in codes}
+    volumes = dict.fromkeys(codes, 0.0)
     for a, b in zip(stations, stations[1:]):
         length = b - a
         for c in codes:

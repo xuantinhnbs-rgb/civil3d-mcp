@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/xuantinhnbs-rgb/civil3d-mcp/security/advisories/new
+    about: Report privately, not as a public issue. See SECURITY.md.
+  - name: Setup and troubleshooting
+    url: https://github.com/xuantinhnbs-rgb/civil3d-mcp#troubleshooting
+    about: Run `python install.py --check` first — it reports most configuration problems directly.
+  - name: "Known limits of Civil 3D's COM API"
+    url: https://github.com/xuantinhnbs-rgb/civil3d-mcp#known-limits
+    about: Assemblies, corridor targets and subassembly parameters cannot be created or edited over COM. Check here before filing.

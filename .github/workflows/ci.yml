@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Chi can quyen doc ma nguon.
+permissions:
+  contents: read
+
+# Push moi len cung mot nhanh se huy lan chay cu con dang do.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint (ruff)
+    # Lint khong cham vao Civil 3D nen chay tren Linux cho nhanh.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Cai ruff
+        run: pip install -r requirements-dev.txt
+
+      - name: ruff check
+        run: ruff check --output-format=github .
+
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    # COM cua Civil 3D chi co tren Windows.
+    runs-on: windows-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+
+    env:
+      PYTHONIOENCODING: utf-8
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Cai Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Cai thu vien
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      # compileall bao trum ca nhung file khong test nao import, nen bat duoc
+      # loi cu phap o moi noi chu khong chi o duong chay cua test.
+      - name: Kiem tra cu phap toan bo ma nguon
+        run: python -m compileall -q civil3d_mcp civil3d_server.py install.py tests
+
+      # Civil 3D KHONG duoc cai tren runner, va do la chu y: bo test offline
+      # phai chay duoc o do. Bo test live (tests/test_live_civil3d.py) tu bo qua
+      # khi thieu bien CIVIL3D_LIVE_TEST; neu mot thay doi lam no khong bo qua
+      # nua thi CI se do ngay - va do chinh la tin hieu can.
+      - name: Chay test
+        run: pytest
+
+      - name: Nap thu MCP server
+        run: python install.py --check

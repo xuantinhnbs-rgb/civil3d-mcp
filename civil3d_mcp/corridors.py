@@ -17,16 +17,18 @@ from __future__ import annotations
 
 import os
 import time
-
 from typing import Dict, List, Optional, Sequence
 
 from .alignments import get_alignment, get_profile
 from .client import Civil3DClient, variant_point
 from .com import C3DError, reraise_if_transient
+from .geometry import station_range
 
+# Corridors.Add trả về đối tượng nhưng nó CHƯA có trong collection ở lần đọc đầu.
+# Phải thử lại vài trăm ms; kiểm chứng quá sớm sẽ báo hỏng một thao tác đã thành
+# công, và người dùng tạo lại thì sinh ra corridor thứ hai.
 CREATE_LOOKUP_ATTEMPTS = 8
 CREATE_LOOKUP_DELAY = 0.25
-from .geometry import station_range
 
 BASELINE_TYPES = {0: "main", 1: "offset", 2: "hardcoded_offset"}
 
@@ -683,6 +685,28 @@ def _diagnose_no_sections(sample_lines: int, sampled_surfaces: int, enabled: int
             "mặt (get_surface_info) với phạm vi lý trình của tuyến.")
 
 
+def sampled_surface_names(client: Civil3DClient, alignment: str, group: str) -> List[str]:
+    """Tên các bề mặt mà một nhóm sample line KHAI BÁO lấy mẫu.
+
+    Dùng để đối chiếu với các bề mặt thật sự có dữ liệu trong bản xuất: hai danh
+    sách này lệch nhau chính là dấu hiệu một bề mặt đã bị bỏ lặng lẽ.
+
+    `IAeccSampledSurface` trong bản 13.8 không có `SurfaceName`; tên phải lấy qua
+    đối tượng `Surface` của nó.
+    """
+    al = get_alignment(client, alignment)
+    grp = Civil3DClient.find_item(al.SampleLineGroups, group, "nhóm sample line")
+    names: List[str] = []
+    coll = Civil3DClient._safe(lambda: grp.SampledSurfaces, default=None)
+    if coll is None:
+        return names
+    for i in range(int(coll.Count)):
+        n = Civil3DClient._safe(lambda k=i: str(coll.Item(k).Surface.Name), default=None)
+        if n:
+            names.append(n)
+    return names
+
+
 def read_sections(client: Civil3DClient, alignment: str, group: str,
                   offset_interval: float = 1.0,
                   max_sample_lines: Optional[int] = None) -> Dict[str, object]:
@@ -700,6 +724,7 @@ def read_sections(client: Civil3DClient, alignment: str, group: str,
 
     rows: List[Dict[str, object]] = []
     skipped = 0
+    skipped_surfaces: Dict[str, int] = {}
     for i in range(min(limit, int(lines.Count))):
         line = lines.Item(i)
         station = Civil3DClient._safe(lambda ln=line: round(float(ln.Station), 6), default=None)
@@ -710,7 +735,13 @@ def read_sections(client: Civil3DClient, alignment: str, group: str,
             left = Civil3DClient._safe(lambda s=sec: float(s.LengthLeft), default=None)
             right = Civil3DClient._safe(lambda s=sec: float(s.LengthRight), default=None)
             if left is None or right is None:
+                # Section có đối tượng nhưng chưa có hình học - Civil 3D báo
+                # "The parameter is incorrect" trên chính LengthLeft. Ghi lại TÊN BỀ MẶT
+                # bị bỏ, đừng chỉ đếm: một sample line group lấy mẫu nhiều bề mặt mà
+                # mất trọn một bề mặt vẫn cho ra file CSV trông hoàn toàn bình thường.
                 skipped += 1
+                skipped_surfaces[surface_name or "(không đọc được tên)"] = (
+                    skipped_surfaces.get(surface_name or "(không đọc được tên)", 0) + 1)
                 continue
             offset = -abs(left)
             while offset <= abs(right) + 1e-9:
@@ -729,5 +760,16 @@ def read_sections(client: Civil3DClient, alignment: str, group: str,
         "rows": rows,
         "row_count": len(rows),
         "sections_skipped": skipped,
+        "sections_skipped_by_surface": skipped_surfaces,
+        "surfaces_with_data": sorted({str(r["surface"]) for r in rows if r["surface"]}),
+        "rows_by_surface": _count_by_surface(rows),
         "offset_convention": "offset âm bên trái tim tuyến, dương bên phải",
     }
+
+
+def _count_by_surface(rows: List[Dict[str, object]]) -> Dict[str, int]:
+    out: Dict[str, int] = {}
+    for r in rows:
+        key = str(r["surface"]) if r["surface"] else "(không đọc được tên)"
+        out[key] = out.get(key, 0) + 1
+    return out

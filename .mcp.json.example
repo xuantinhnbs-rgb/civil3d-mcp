@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "civil3d-2026": {
+      "command": "C:/Python314/python.exe",
+      "args": [
+        "C:/duong/dan/toi/civil3d-mcp/civil3d_server.py"
+      ],
+      "cwd": "C:/duong/dan/toi/civil3d-mcp",
+      "env": {
+        "PYTHONUNBUFFERED": "1",
+        "PYTHONIOENCODING": "utf-8"
+      }
+    }
+  }
+}

@@ -1,290 +1,398 @@
-# Autodesk Civil 3D MCP Server
+# civil3d-mcp
 
-Máy chủ MCP điều khiển **Autodesk Civil 3D** đang chạy trên máy này qua COM, phục vụ
-đề tài *Xây dựng mô hình thông tin hoàn công (As-built BIM) công trình hạ tầng giao
-thông từ dữ liệu đám mây điểm*.
+***English** · [Tiếng Việt](README.vi.md)*
 
-Nó là nửa sau của một cặp: [`recap-mcp`](https://github.com/xuantinhnbs-rgb/recap-mcp)
-xử lý đám mây điểm (lọc, phân lớp, xuất điểm), còn máy chủ này nhận điểm đã lọc và
-dựng **TIN surface → alignment → profile → corridor → trắc ngang → số liệu sai lệch**.
-Hai máy chủ dùng được độc lập với nhau.
+[![CI](https://github.com/xuantinhnbs-rgb/civil3d-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/xuantinhnbs-rgb/civil3d-mcp/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
+[![Platform](https://img.shields.io/badge/platform-Windows-lightgrey.svg)](#requirements)
+
+An MCP server that drives **Autodesk Civil 3D** over COM. It lets Claude — or any
+MCP client such as Claude Code, Claude Desktop, Cursor or Cline — build
+**TIN surface → alignment → profile → corridor → cross sections → deviation
+statistics** from filtered point-cloud data, and export the numbers straight to
+CSV.
+
+It was written for as-built BIM research on transport infrastructure, where the
+deliverable is a table of deviations with a defensible provenance, not a picture.
 
 ```
-recap-mcp                     civil3d-mcp                          báo cáo
-─────────                     ───────────                          ───────
-LAS/LAZ ──lọc──> XYZ  ──>  TIN surface  ──┬─> volume surface ──> khối lượng đào/đắp
-                                          ├─> alignment ─> profile ─> CSV lý trình–cao độ
-                                          ├─> corridor ─> sample line ─> CSV trắc ngang
-                                          └─> điểm kiểm tra ──> RMSE, độ lệch chuẩn
+filtered point cloud            civil3d-mcp                         report
+────────────────────            ───────────                         ──────
+LAS/LAZ ──filter──> XYZ  ──> TIN surface ──┬─> volume surface ──> cut/fill quantities
+                                           ├─> alignment ─> profile ─> station/elevation CSV
+                                           ├─> corridor ─> sample lines ─> cross-section CSV
+                                           └─> check points ──> RMSE, standard deviation
 ```
 
-## Môi trường đã kiểm chứng
+The point-cloud filtering step is out of scope here. A separate MCP server covers
+it: [recap-mcp](https://github.com/xuantinhnbs-rgb/recap-mcp) reads Autodesk ReCap
+projects and analyses LAS/LAZ. The two repositories are independent — either is
+useful on its own.
 
-| Thành phần | Giá trị trên máy này |
+Every tool returns JSON with an `ok` key — `{"ok": true, ...}` on success,
+`{"ok": false, "error": "..."}` on failure. No tool lets an exception escape, so
+the model receives a readable message instead of a raw COM stack trace.
+
+> **Note on documentation language.** Code comments and the detailed guide are
+> written in Vietnamese. This README is the English entry point; the Vietnamese
+> one is [README.vi.md](README.vi.md).
+
+---
+
+## What it looks like
+
+### A TIN surface built entirely through MCP calls
+
+![A TIN surface and profile built in Civil 3D through the MCP server](docs/images/civil3d-tin-surface.png)
+
+No project file was opened: a new drawing from the Civil 3D template, then
+`create_tin_surface` and `add_points_to_surface` to load the points, and
+`create_alignment`, `create_profile_from_surface` and `create_profile_view` for
+the rest. The full call sequence is in
+[docs/images/README.md](docs/images/README.md).
+
+### Verified on a machine with Civil 3D closed
+
+![install.py --check, ruff and pytest all passing](docs/images/install-check-and-tests.png)
+
+`install.py --check` loads the server, counts its tools and reports which Civil 3D
+it found; `ruff` is clean; the offline suite passes — with no Civil 3D session
+open.
+
+---
+
+## Requirements
+
+- **Windows.** Civil 3D's COM API is Windows-only.
+- **Python 3.10 or newer**, with `pywin32` and `mcp`.
+- **Autodesk Civil 3D.** Civil 3D runs **on top of AutoCAD**, but plain AutoCAD is
+  **not** a substitute: the Surfaces/Alignments/Corridors collections only exist in
+  Civil 3D. `check_civil3d_connection` detects that case and says so explicitly.
+
+The offline test suite runs on a machine **without** Civil 3D installed.
+
+## Verified environment
+
+| Component | Value on the development machine |
 |---|---|
 | Civil 3D | 2026 (English), `C:\Program Files\Autodesk\AutoCAD 2026\` |
-| Phiên bản COM | **13.8** (`AeccXUiLand.AeccApplication.13.8`) |
-| Nền AutoCAD | `AutoCAD.Application.25.1` |
-| Python | 3.14, cần `pywin32` và `mcp` |
+| COM version | **13.8** (`AeccXUiLand.AeccApplication.13.8`) |
+| Underlying AutoCAD | `AutoCAD.Application.25.1` |
+| Python | 3.14, with `pywin32` and `mcp` |
 
-Số hiệu COM **không** trùng năm phát hành. Máy chủ tự dò số đó từ registry chứ không
-hardcode, nên vẫn chạy khi bạn nâng cấp Civil 3D — nhưng chữ ký API thì được lấy từ
-type library của bản 13.8, nên bản khác cần thử lại.
+The COM version number does **not** track the release year. The server discovers it
+from the registry rather than hardcoding it, so it keeps working when you upgrade —
+but the API signatures were measured against 13.8, so another version needs
+re-testing.
 
-## Cài đặt
+---
+
+## Install
 
 ```powershell
 git clone https://github.com/xuantinhnbs-rgb/civil3d-mcp.git
 cd civil3d-mcp
-python -m pip install -r requirements.txt
+
+pip install -r requirements.txt
+python install.py
 ```
 
-Thêm vào `.mcp.json` của Claude Code (thay `<ĐƯỜNG_DẪN_REPO>` bằng nơi bạn vừa clone
-về, và `<PYTHON>` bằng trình thông dịch Python 3.12+ trên máy bạn):
+`install.py` detects the Python interpreter and repository directory **on the
+machine it is running on**, verifies the packages, loads the server to confirm its
+tools register, reports which Civil 3D installation and COM version it found, and
+only then writes `.mcp.json`. You never edit a path by hand.
 
-```json
-{
-  "mcpServers": {
-    "civil3d-2026": {
-      "command": "<PYTHON>",
-      "args": ["<ĐƯỜNG_DẪN_REPO>/civil3d_server.py"],
-      "cwd": "<ĐƯỜNG_DẪN_REPO>",
-      "env": { "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8" }
-    }
-  }
-}
+```powershell
+python install.py --check            # verify only, write nothing
+python install.py --claude-desktop   # also write Claude Desktop's config
 ```
 
-`PYTHONIOENCODING` không phải tuỳ chọn trang trí: README và thông điệp lỗi của máy chủ
-này viết bằng tiếng Việt, thiếu nó thì trên Windows tiến trình sẽ chết vì lỗi mã hoá
-cp1252 chứ không phải vì logic sai.
+Then open Claude Code **in the repository root** and run `/mcp` to confirm the
+server connected.
 
-## Kiến trúc
+`.mcp.json` is deliberately **not** in the repository: it contains absolute paths
+valid on exactly one machine. See [.mcp.json.example](.mcp.json.example).
 
-Civil 3D chạy **trên nền AutoCAD**: tiến trình vẫn là `acad.exe`, và API tự động hoá
-có hai tầng chồng nhau.
+Civil 3D does **not** need to be running at install time — the server attaches to a
+session lazily.
 
-| Tầng | Lấy bằng | Cho ra |
+---
+
+## Architecture
+
+Civil 3D runs **on top of AutoCAD**: the process is still `acad.exe`, and the
+automation API comes in two layers stacked on each other.
+
+| Layer | Obtained with | Gives you |
 |---|---|---|
-| AutoCAD | `GetActiveObject("AutoCAD.Application.25.1")` | ModelSpace, Layers, SendCommand, handle |
+| AutoCAD | `GetActiveObject("AutoCAD.Application.25.1")` | ModelSpace, Layers, SendCommand, handles |
 | Civil 3D – land | `acad.GetInterfaceObject("AeccXUiLand.AeccApplication.13.8")` | Surfaces, Alignments, Profiles, Points, Sites |
 | Civil 3D – roadway | `acad.GetInterfaceObject("AeccXUiRoadway.AeccRoadwayApplication.13.8")` | Corridors, Assemblies, Subassemblies |
 
-| File | Vai trò |
+| File | Role |
 |---|---|
-| `civil3d_mcp/com.py` | Luồng COM chuyên trách, dịch HRESULT, dò phiên bản từ registry, kết nối |
-| `civil3d_mcp/client.py` | `Civil3DClient`: giữ kết nối, thử lại, truy cập tài liệu, đóng gói VARIANT |
-| `civil3d_mcp/geometry.py` | Tính toán thuần Python: chia lô, dãy lý trình, thống kê RMSE, CSV |
-| `civil3d_mcp/surfaces.py` | TIN surface, volume surface, nạp điểm, lấy mẫu, so sánh |
-| `civil3d_mcp/alignments.py` | Tuyến, trắc dọc, profile view, quy đổi lý trình ↔ toạ độ |
-| `civil3d_mcp/corridors.py` | Corridor, baseline, sample line, trắc ngang |
-| `civil3d_mcp/research.py` | Sản phẩm cho báo cáo: lưới sai lệch, CSV, báo cáo Markdown |
-| `civil3d_mcp/server.py` | 58 tool MCP |
+| `civil3d_mcp/com.py` | The dedicated COM thread, HRESULT translation, registry version discovery, connection |
+| `civil3d_mcp/client.py` | `Civil3DClient`: holds the connection, retries, document access, VARIANT packing |
+| `civil3d_mcp/geometry.py` | Pure-Python computation: batching, station series, RMSE statistics, CSV |
+| `civil3d_mcp/surfaces.py` | TIN surfaces, volume surfaces, point loading, sampling, comparison |
+| `civil3d_mcp/alignments.py` | Alignments, profiles, profile views, station ↔ coordinate conversion |
+| `civil3d_mcp/corridors.py` | Corridors, baselines, sample lines, cross sections |
+| `civil3d_mcp/research.py` | Report deliverables: deviation grids, CSV, Markdown reports |
+| `civil3d_mcp/server.py` | The MCP tool surface |
 
-### Ba quyết định thiết kế đáng chú ý
+### Three design decisions worth knowing
 
-**Một luồng COM duy nhất.** Máy chủ MCP chạy tool trong thread pool, còn COM không
-cho dùng con trỏ giao diện chéo luồng. Mọi lời gọi — kể cả hàm kiểm tra kết nối và các
-property đọc tài liệu — đều đi qua `Civil3DClient.run()`. Bỏ sót một đường vào không
-sinh lỗi tại chỗ; nó chỉ làm lỗi hiện ra muộn hơn ở một dòng chẳng liên quan.
+**One single COM thread.** The MCP server runs tools in a thread pool, and COM does
+not allow interface pointers across threads. Every call — including the connection
+check and plain document property reads — goes through `Civil3DClient.run()`.
+Missing one entry point produces no error at that line; it makes a failure appear
+later, somewhere unrelated.
 
-**Thao tác ghi tự kiểm chứng.** Một lời gọi COM không ném lỗi *không* phải bằng chứng
-thao tác đã có hiệu lực. Mọi tool ghi đều đọc lại kết quả và trả về `verified` +
-`verified_by`. Ví dụ `add_points_to_surface` báo `points_added_measured` lấy từ chênh
-lệch `Statistics.NumberOfPoints` trước/sau, chứ không phải số điểm đã gửi.
+**Writes verify themselves.** A COM call that does not raise is *not* evidence the
+operation took effect. Every writing tool reads the result back and returns
+`verified` and `verified_by`. `add_points_to_surface`, for example, reports
+`points_added_measured` computed from the before/after difference in
+`Statistics.NumberOfPoints` — not the number of points it sent.
 
-**Lô đầu tiên là phép hiệu chuẩn.** `AddPointMultiple` nhận một SAFEARRAY mà tài liệu
-không nói rõ bố cục, và bố cục sai thì nó im lặng không thêm điểm nào. Vì vậy lô đầu
-được gửi theo bố cục phẳng rồi đo lại; số điểm không tăng thì tự chuyển sang bố cục
-mảng-của-mảng. Khoá `array_layout_used` trong kết quả cho biết bố cục nào đã ăn.
+**The first batch is a calibration.** `AddPointMultiple` takes a SAFEARRAY whose
+layout the documentation does not pin down, and the wrong layout silently adds
+nothing. So the first batch goes out in the flat layout and is then measured; if
+the count did not rise, the server switches to array-of-arrays. The
+`array_layout_used` key in the result says which one worked.
 
-## Bộ tool (58 tool)
+---
 
-### Kết nối và bản vẽ
-| Tool | Việc |
+## Tools (58)
+
+### Connection and drawings
+| Tool | What it does |
 |---|---|
-| `check_civil3d_connection` | **Gọi đầu tiên.** Phân biệt: chưa cài / chưa chạy / đang bám nhầm AutoCAD thuần |
-| `launch_civil3d` | Khởi động với đúng tham số `/ld AecBase.dbx /p <<C3D_Metric>> /product C3D` |
-| `create_new_drawing` | Bản vẽ mới từ template — cách đúng để bắt đầu (mở thẳng .dwt là sửa template của máy) |
-| `get_drawing_info`, `list_open_drawings`, `open_drawing`, `save_drawing`, `switch_drawing` | Quản lý bản vẽ |
-| `send_civil3d_command` | Lối thoát cho chức năng COM không có. **Bất đồng bộ, không trả kết quả** |
-| `get_environment_report` | Bản ghi phiên bản phần mềm cho mục "môi trường thực nghiệm" |
+| `check_civil3d_connection` | **Call this first.** Distinguishes: not installed / not running / attached to plain AutoCAD by mistake |
+| `launch_civil3d` | Starts it with the right `/ld AecBase.dbx /p <<C3D_Metric>> /product C3D` arguments |
+| `create_new_drawing` | New drawing from a template — the correct way to start (opening a .dwt directly edits your template). **`template_path` must be a full path**; see the note below |
+| `get_drawing_info`, `list_open_drawings`, `open_drawing`, `save_drawing`, `switch_drawing` | Drawing management |
+| `send_civil3d_command` | Escape hatch for what COM does not expose. **Asynchronous, returns no result** |
+| `get_environment_report` | A software-version record for the "experimental environment" section of a paper |
 
-### Bề mặt
-| Tool | Việc |
+### Surfaces
+| Tool | What it does |
 |---|---|
-| `list_surfaces`, `get_surface_info` | Liệt kê, thống kê, hộp bao, thành phần định nghĩa |
-| `create_tin_surface` | TIN surface rỗng |
-| `add_points_to_surface` | Nạp điểm qua COM — dùng cho vài nghìn điểm |
-| `add_point_file_to_surface` | Gắn file điểm trên đĩa — **dùng cho dữ liệu quét thật** |
-| `build_surface_from_xyz_file` | Một bước: tạo + nạp + đặt `max_triangle_length` + rebuild |
+| `list_surfaces`, `get_surface_info` | Listing, statistics, bounds, definition components |
+| `create_tin_surface` | An empty TIN surface |
+| `add_points_to_surface` | Load points over COM — for a few thousand points |
+| `add_point_file_to_surface` | Attach a point file on disk — **use this for real scan data** |
+| `build_surface_from_xyz_file` | One step: create + load + set `max_triangle_length` + rebuild |
 | `import_surface_file` | LandXML / TIN / DEM |
-| `set_surface_build_options`, `rebuild_surface`, `delete_surface` | Tham số dựng TIN, rebuild, xoá (cần `confirm=True`) |
-| `create_volume_surface` | So hai bề mặt → khối lượng đào/đắp/thực |
-| `sample_surface_elevations`, `sample_surface_section` | Cao độ tại điểm; mặt cắt theo đoạn thẳng |
-| `compare_surface_to_check_points` | RMSE so với điểm kiểm tra ngoại nghiệp |
-| `compare_two_surfaces` | Lưới sai lệch cao độ trong vùng chồng lấn |
+| `set_surface_build_options`, `rebuild_surface`, `delete_surface` | TIN build parameters, rebuild, delete (needs `confirm=True`) |
+| `create_volume_surface` | Compare two surfaces → cut/fill/net quantities |
+| `sample_surface_elevations`, `sample_surface_section` | Elevation at points; a section along a line |
+| `compare_surface_to_check_points` | RMSE against independently surveyed check points |
+| `compare_two_surfaces` | Elevation deviation grid over the overlapping region |
 
-### Tuyến và trắc dọc
-| Tool | Việc |
+### Alignments and profiles
+| Tool | What it does |
 |---|---|
-| `list_alignments`, `get_alignment_info` | Quét cả tuyến siteless và tuyến trong Site |
-| `create_alignment`, `create_alignment_from_polyline` | Tạo tuyến từ dãy đỉnh hoặc từ polyline |
-| `alignment_station_offset`, `alignment_point_location`, `sample_alignment` | Quy đổi lý trình ↔ toạ độ |
-| `list_profiles`, `create_profile_from_surface`, `sample_profile` | Trắc dọc từ bề mặt, bảng lý trình–cao độ–độ dốc |
-| `compare_profiles` | Sai lệch cao độ hoàn công vs thiết kế theo lý trình |
-| `create_profile_view` | Khung nhìn trắc dọc |
+| `list_alignments`, `get_alignment_info` | Finds both siteless alignments and alignments inside Sites |
+| `create_alignment`, `create_alignment_from_polyline` | From a vertex list or from a polyline |
+| `alignment_station_offset`, `alignment_point_location`, `sample_alignment` | Station ↔ coordinate conversion |
+| `list_profiles`, `create_profile_from_surface`, `sample_profile` | Profiles from a surface; station/elevation/grade tables |
+| `compare_profiles` | As-built vs design elevation deviation by station |
+| `create_profile_view` | The profile view frame |
 
-### Corridor và trắc ngang
-| Tool | Việc |
+### Corridors and cross sections
+| Tool | What it does |
 |---|---|
-| `list_assemblies`, `list_corridors`, `get_corridor_info` | Liệt kê, baseline, vùng lý trình, mặt corridor |
-| `list_assembly_library`, `import_assembly` | **Cách tạo assembly khi chỉ có COM**: chép từ thư viện assembly mẫu của Civil 3D |
-| `create_corridor`, `add_corridor_baseline`, `rebuild_corridor` | Dựng và tính corridor |
-| `sample_corridor_surface` | Cao độ mặt corridor |
-| `corridor_points`, `corridor_shape_areas` | Hình học corridor đã tính: điểm kèm mã, diện tích từng lớp kết cấu |
-| `create_sample_lines`, `create_sections`, `read_sections` | Sample line và trắc ngang |
+| `list_assemblies`, `list_corridors`, `get_corridor_info` | Listing, baselines, station ranges, corridor surfaces |
+| `list_assembly_library`, `import_assembly` | **How to get an assembly when COM cannot create one**: copy it from Civil 3D's sample assembly library |
+| `create_corridor`, `add_corridor_baseline`, `rebuild_corridor` | Build and compute a corridor |
+| `sample_corridor_surface` | Corridor surface elevations |
+| `corridor_points`, `corridor_shape_areas` | Computed corridor geometry: coded points, per-layer areas |
+| `create_sample_lines`, `list_sample_line_groups`, `create_sections`, `read_sections` | Sample lines, their groups, and cross sections |
 
-### Xuất số liệu
-| Tool | Việc |
+### Exporting data
+| Tool | What it does |
 |---|---|
-| `export_surface_comparison` | CSV lưới + CSV thống kê + báo cáo Markdown ghi đủ điều kiện sinh số liệu |
-| `export_profile_csv`, `export_sections_csv` | Trắc dọc, trắc ngang ra CSV |
-| `export_check_point_report` | Đối chiếu điểm kiểm tra, xuất CSV kèm RMSE |
-| `export_corridor_points_csv` | Điểm hình học corridor ra CSV |
-| `export_corridor_quantities` | Diện tích theo lý trình + thể tích từng lớp kết cấu |
+| `export_surface_comparison` | Grid CSV + statistics CSV + a Markdown report recording the conditions the numbers came from |
+| `export_profile_csv`, `export_sections_csv` | Profiles and cross sections to CSV |
+| `export_check_point_report` | Check-point comparison, CSV with RMSE |
+| `export_corridor_points_csv` | Corridor geometry points to CSV |
+| `export_corridor_quantities` | Area by station plus volume per structural layer |
 
-## Giới hạn đã biết
+### A note on `create_new_drawing`
 
-Những điều này là **tính chất của COM Civil 3D**, không phải thiếu sót có thể vá trong
-máy chủ này:
-
-1. **Không tạo được assembly và subassembly *từ đầu*.** `AeccAssemblies` chỉ có `Count`
-   và `Item` — đã kiểm bằng type library, không phải suy đoán. Nhưng **chép được**:
-   `import_assembly` chèn một bản vẽ chứa assembly vào bản vẽ hiện hành và assembly đi
-   theo. Civil 3D cài sẵn 16 bản vẽ assembly mẫu ở
-   `C:\ProgramData\Autodesk\C3D 2026\enu\Assemblies\Metric\` (xem `list_assembly_library`),
-   nên trong thực tế giới hạn này không còn chặn đường nữa.
-2. **Không gán được target cho corridor.** `AeccBaselineRegion` không có thành viên nào
-   về target, nên subassembly cần bề mặt đích (mọi loại daylight / side slope) sẽ làm
-   `Rebuild` hỏng với `0x80004005`. Hai cách đi tiếp: chọn assembly không có subassembly
-   daylight, hoặc xoá subassembly đó sau khi nhập (`subassembly.Delete()` qua COM được).
-3. **Không tạo được corridor surface.** `AeccCorridorSurfaces` cũng chỉ đọc. Thay vào đó
-   dùng `corridor_points` / `corridor_shape_areas`: chúng đọc thẳng hình học corridor đã
-   tính, đủ cho bảng lý trình–offset–cao độ và cho khối lượng theo lớp.
-4. **Không sửa được tham số subassembly.** `ParamsDouble`/`ParamsLong`/… trả về đối tượng
-   COM không gọi được `Count` lẫn `Item`, và `CastTo` với type library đã makepy vẫn báo
-   "Element not found". Bề rộng làn, độ dốc ngang… phải sửa trong bảng thuộc tính của
-   Civil 3D.
-5. **Lệnh gửi qua `send_civil3d_command` là một chiều.** COM trả về khi lệnh được xếp
-   hàng, không có mã lỗi nào quay lại, và lệnh nào chờ người dùng bấm chuột sẽ treo
-   giao diện. Sau mỗi lệnh phải kiểm chứng bằng một tool đọc.
-6. **Bản vẽ phải dựng từ template Civil 3D.** Tạo surface/alignment/profile đều đòi một
-   style có thật; bản vẽ AutoCAD trắng không có style nào và tool sẽ báo lỗi rõ.
-7. **Không xuất được LandXML qua COM** (chỉ nhập được). Muốn xuất thì phải qua
-   `send_civil3d_command` với lệnh `-LandXMLOut`, và kiểm chứng bằng cách kiểm tra file
-   trên đĩa.
-8. **Corridor lớn rebuild rất lâu** và COM chặn cho tới khi xong. Đọc khoá `out_of_date`
-   trong kết quả: còn `true` nghĩa là chưa tính xong.
-9. **Đơn vị đi theo bản vẽ.** Máy chủ không tự quy đổi. `get_drawing_info` trả về
-   `measurement` và `drawing_units` để kiểm tra trước khi đọc số liệu.
-10. **Dấu của khối lượng theo quy ước Civil 3D:** cut là phần bề mặt so sánh *thấp hơn*
-   bề mặt gốc. Kết quả của `create_volume_surface` ghi kèm quy ước này.
-
-## Quy trình mẫu cho đề tài
+`template_path` takes a **full path**, not a filename:
 
 ```
-1. check_civil3d_connection            → xác nhận bám đúng Civil 3D 2026
-2. open_drawing(template có style)     → hoặc bản vẽ thiết kế đã có
-3. build_surface_from_xyz_file(
-     "HOANCONG", "duong_da_loc.xyz",
-     max_triangle_length=5)            → TIN hoàn công từ đám mây điểm đã lọc
-4. import_surface_file("thietke.xml")  → TIN thiết kế từ LandXML
-5. export_surface_comparison(
-     "HOANCONG", "THIETKE", out_dir,
-     spacing=1, edge_inset=2,
-     volume_surface_name="SO_SANH")    → CSV + thống kê + khối lượng + báo cáo
-6. export_check_point_report(
-     "HOANCONG", "diem_kiem_tra.csv")  → RMSE so với số đo độc lập
-7. create_alignment_from_polyline(...)  → tim tuyến
-8. create_profile_from_surface(...)     → trắc dọc hoàn công
-9. compare_profiles(...)                → sai lệch cao độ theo lý trình
-10. create_sample_lines + create_sections + export_sections_csv → trắc ngang
+C:\Users\<you>\AppData\Local\Autodesk\C3D 2026\enu\Template\_Autodesk Civil 3D (Metric) NCS.dwt
 ```
 
-Bước 6 là bước có giá trị nhất khi bảo vệ kết quả: điểm kiểm tra không tham gia dựng
-bề mặt nên sai lệch tính ra là số đo độc lập. Bước 5 cho hai phép đo khối lượng độc
-lập nhau (lưới lấy mẫu và TIN của Civil 3D); chênh lệch giữa chúng chính là ảnh hưởng
-của bước lưới, và nên được báo cáo chứ không nên làm tròn cho khớp.
+Pass a bare filename and Civil 3D quietly falls back to its default template. That
+drawing has exactly one surface style, `Standard`, which displays nothing — so the
+symptom is a surface that builds successfully, reports the right statistics, and is
+invisible on screen. No error is raised anywhere.
 
-## Khác biệt so với tài liệu COM
+The `template` key in the result echoes the path that was used, so **`null` there
+means no template was applied** — check it rather than assuming.
 
-Mười hai điểm dưới đây **đo được trên Civil 3D 2026 (COM 13.8)**, không suy đoán: mỗi
-điểm là một lời gọi bị từ chối hoặc trả kết quả rỗng cho tới khi làm đúng cách bên
-cột phải. Chúng đã được sửa trong máy chủ này; liệt kê ra để ai đọc code không nghĩ
-các dòng đó là thừa, và để người viết công cụ Civil 3D khác đỡ mất thời gian.
+Style names must also exist in the drawing. A style that is not there makes
+`AddTinSurface` fail with `E_INVALIDARG`, the same code as a missing `BaseLayer`,
+so the error message does not point at the real cause. The Metric NCS template
+ships 14 surface styles; `Contours and Triangles` is the clearest for a figure.
 
-| # | Lời gọi | Tài liệu / trực giác nói | Thực tế đo được |
-|---|---|---|---|
-| 1 | `Surfaces.AddTinSurface` | Chỉ cần `Name` + `Style` | Đòi **cả `Layer` lẫn `BaseLayer`**; thiếu `BaseLayer` → `E_INVALIDARG` hiện ra là "Exception occurred" |
-| 2 | `Surfaces.AddTinVolumeSurface` | `Description` là tuỳ chọn | **`Description` rỗng bị từ chối**; 4 tổ hợp mô tả rỗng đều hỏng, tổ hợp có mô tả thì chạy. `AddTinSurface` thường lại không đòi |
-| 3 | `Profiles.AddFromSurface` | Tham số `Surface` nhận đối tượng bề mặt | Đòi **TÊN bề mặt dạng chuỗi**; truyền đối tượng → `E_INVALIDARG` |
-| 4 | `SampleLineGroups.Add`, `SampledSurfaces.AddAllSurfaces` | Đối xứng với (3), tức nhận tên | Ngược lại: đòi **ĐỐI TƯỢNG style**; truyền tên → `TypeError` của pywin32 |
-| 5 | `SampledSurfaces.AddAllSurfaces` | Thêm bề mặt là xong | Thêm nhưng để **cờ `Sample` TẮT**, nên `CreateSectionsAtSampleLines` chạy trót lọt mà **không sinh section nào** |
-| 6 | `AlignmentEntities.AddFixedLine1` | Toạ độ 2D là đủ cho hình học bằng | Đòi **mảng 3 thành phần**; mảng 2 thành phần → `E_INVALIDARG` |
-| 7 | `AeccSurfaceType`, `AeccProfileType`, `AeccAlignmentEntityType` | Enum đánh số từ 0 | Đánh số **từ 1**. Truyền 0 bị từ chối bằng `E_INVALIDARG`, còn khi chỉ dùng để hiển thị thì mọi TIN surface bị gán nhãn sai thành volume surface |
-| 8 | `Document.ProfileStyles` | Style trắc dọc của Civil 3D | **Luôn rỗng** (đó là collection của tầng AEC nền). Style trắc dọc nằm ở **`LandProfileStyles`** |
-| 9 | `ProfileViews.Add` | Chuỗi rỗng ở tham số bộ band = "không cần band" | **Đòi tên một bộ band CÓ THẬT**; chuỗi rỗng → `E_INVALIDARG`. Nghĩa "không có band" là một thành viên có tên: **`_No Bands`**. Và collection chứa chúng tên là **`ProfileViewBandStyleSets`**, không phải `ProfileViewBandSetStyles`; `ProfileViewBandStyles` có tồn tại nhưng không đọc được `Count` |
-| 10 | `AeccRoadwayDocument.Assemblies` | Bản vẽ chưa có assembly → collection rỗng | **Chính property bị từ chối** bằng `E_INVALIDARG` khi rỗng, nên "chưa có assembly" trông y hệt "lời gọi hỏng". `Corridors` cùng đối tượng cha vẫn trả về 0 bình thường, nên không suy rộng được |
-| 11 | `Corridors.Add` | Corridor có ngay sau khi Add | **Chưa thấy trong collection** ở lần đọc đầu; phải thử lại vài trăm ms. Kiểm chứng đọc quá sớm báo hỏng một thao tác đã thành công, và người dùng tạo lại thì sinh corridor thứ hai |
-| 12 | `ModelSpace.InsertBlock` với .dwg chứa đối tượng AEC | Đối tượng nằm trong định nghĩa block, phải `Explode` mới ra | Civil 3D **trộn thẳng** đối tượng AEC vào cơ sở dữ liệu ngay khi chèn; `Explode` thêm sinh ra **bản sao thứ hai** (đo được: 2 assembly + 6 subassembly thay vì 1 + 3) |
+---
 
-Ba điểm nữa về hành vi, không phải tham số:
+## Known limits
 
-- **`Alignment.Entities.Count` còn là 0 ngay sau khi thêm đoạn**, trong khi `Length`
-  đã đúng. Một phép kiểm chứng đọc quá sớm còn tệ hơn không kiểm chứng: nó báo hỏng
-  một thao tác đã thành công. Máy chủ vì vậy kiểm chứng tuyến bằng chiều dài.
-- **Civil 3D đang bận từ chối `GetActiveObject` cho mọi ProgID**, y như khi chưa
-  chạy. Không phân biệt hai trường hợp này thì người dùng được khuyên mở thêm một
-  phiên thứ hai — đúng việc không nên làm. `check_civil3d_connection` trả về khoá
-  `busy` riêng.
-- **pywin32 phát `AttributeError` cho cả "đang bận" lẫn "thuộc tính không tồn tại"**,
-  với thông điệp giống nhau. Phép phân biệt đáng tin duy nhất là thời gian: chờ một
-  nhịp rồi đọc lại (`com.read_optional`).
+These are **properties of Civil 3D's COM API**, not gaps this server could patch:
 
-## Kiểm thử
+1. **Assemblies and subassemblies cannot be created *from scratch*.** `AeccAssemblies`
+   exposes only `Count` and `Item` — checked against the type library, not guessed.
+   But they **can be copied**: `import_assembly` inserts a drawing containing an
+   assembly and the assembly comes with it. Civil 3D ships 16 sample assembly
+   drawings in `C:\ProgramData\Autodesk\C3D 2026\enu\Assemblies\Metric\` (see
+   `list_assembly_library`), so in practice this is no longer a blocker.
+2. **Corridor targets cannot be assigned.** `AeccBaselineRegion` has no target
+   members, so any subassembly needing a target surface (all daylight / side-slope
+   types) makes `Rebuild` fail with `0x80004005`. Two ways forward: pick an assembly
+   without daylight subassemblies, or delete that subassembly after import
+   (`subassembly.Delete()` does work over COM).
+3. **Corridor surfaces cannot be created.** `AeccCorridorSurfaces` is read-only too.
+   Use `corridor_points` / `corridor_shape_areas` instead: they read the computed
+   corridor geometry directly, which is enough for a station/offset/elevation table
+   and for per-layer quantities.
+4. **Subassembly parameters cannot be edited.** `ParamsDouble`/`ParamsLong`/… return
+   a COM object on which neither `Count` nor `Item` resolves, and `CastTo` with a
+   makepy'd type library still reports "Element not found". Lane width, cross slope
+   and the like must be changed in Civil 3D's properties panel.
+5. **`send_civil3d_command` is one-way.** COM returns when the command is queued; no
+   error code comes back, and any command that waits for a mouse click will hang the
+   UI. Verify with a reading tool after every command.
+6. **The drawing must come from a Civil 3D template.** Creating a surface, alignment
+   or profile requires a style that exists; a blank AutoCAD drawing has none, and the
+   tool reports that clearly.
+7. **LandXML cannot be exported over COM** (import only). Export goes through
+   `send_civil3d_command` with `-LandXMLOut`, verified by checking the file on disk.
+8. **Large corridors take a long time to rebuild** and COM blocks until finished.
+   Read the `out_of_date` key: still `true` means the computation has not finished.
+9. **Units follow the drawing.** The server does not convert. `get_drawing_info`
+   returns `measurement` and `drawing_units` so you can check before reading numbers.
+10. **Volume signs follow Civil 3D's convention:** cut is where the comparison
+    surface is *below* the base surface. `create_volume_surface` states the
+    convention in its result.
+
+---
+
+## Where COM differs from its documentation
+
+The 16 differences listed in [README.vi.md](README.vi.md#khác-biệt-so-với-tài-liệu-com)
+were **measured on Civil 3D 2026 (COM 13.8)**, not inferred: each is a call that was
+refused, or returned nothing, until it was made the way the right-hand column
+describes. They are all handled in this server; they are listed so that nobody
+reading the code thinks those lines are redundant, and so the next person writing a
+Civil 3D tool loses less time.
+
+A few highlights:
+
+- `Surfaces.AddTinSurface` demands **both `Layer` and `BaseLayer`**; omitting
+  `BaseLayer` surfaces as a generic "Exception occurred".
+- `Profiles.AddFromSurface` wants the surface **name as a string**, while
+  `SampleLineGroups.Add` wants a **style object** — the opposite convention, in the
+  same API.
+- `Surfaces.Item(i)` hands back the **base `IAeccSurface` interface**, with no
+  `Statistics`. The object returned by `AddTinSurface` at creation time carries the
+  derived interface, so the same line of code works right after creating a surface
+  and fails when the drawing is reopened in a later session.
+- `AeccRoadwayDocument.Assemblies` **refuses the property itself** with
+  `E_INVALIDARG` when the drawing has no assemblies, so "none yet" looks exactly like
+  "the call is broken".
+
+The full table, with all 16 rows and three further behavioural notes, is in the
+Vietnamese README. A test asserts that the count stated in prose matches the number
+of rows in the table — that sentence had already drifted once.
+
+---
+
+## Development
 
 ```powershell
-python -m pytest tests -q                    # 86 phép thử, không cần Civil 3D
-$env:CIVIL3D_LIVE_TEST=1; python -m pytest tests/test_live_civil3d.py -q   # 13 phép thử trên Civil 3D thật
+pip install -r requirements-dev.txt
+
+ruff check .                 # lint
+pytest                       # offline suite; no Civil 3D needed
+python install.py --check    # loads the server, prints tool count and Civil 3D version
+
+# Live suite: builds real geometry in a running Civil 3D
+$env:CIVIL3D_LIVE_TEST=1; pytest tests/test_live_civil3d.py
 ```
 
-**86 phép thử offline** chạy được trên máy không có Civil 3D. Bộ này dùng một lớp COM
-giả để đi qua đúng những đường xử lý mà máy thật ít khi chạm tới:
+The first three are exactly what CI runs.
 
-- lời gọi COM "thành công" nhưng không có hiệu lực (tạo bề mặt không ra bề mặt, nạp
-  điểm không vào điểm nào);
-- bố cục mảng sai bị im lặng bỏ qua, và phép hiệu chuẩn phải phát hiện được;
-- hồi quy cho các khác biệt #1, #2, #6 ở bảng trên — bỏ dòng gán `BaseLayer` hoặc
-  chuyển toạ độ về 2D sẽ làm phép thử đỏ;
-- hai bề mặt không chồng lấn (dấu hiệu lệch hệ toạ độ) phải báo lỗi nói rõ nguyên nhân;
-- "đang bận" phải phân biệt được với "chưa chạy";
-- thống kê sai lệch: RMSE quanh 0 khác độ lệch chuẩn quanh trung bình khi có bias.
+**The offline suite runs on a machine without Civil 3D** — which is why CI can run
+it at all. It uses a fake COM layer to exercise the paths a real machine rarely
+reaches:
 
-Phần tính toán trong `geometry.py` được kiểm thử bằng giá trị tính tay được (tam giác
-3-4-5, RMSE của dãy đối xứng, diện tích hình vuông), không dùng giá trị tham chiếu
-chép lại từ một lần chạy trước.
+- a COM call that "succeeds" without taking effect (creating a surface that does not
+  appear, loading points that do not arrive);
+- a wrong array layout being silently ignored, and the calibration step catching it;
+- regressions for differences #1, #2 and #6 in the table — removing the `BaseLayer`
+  assignment or dropping coordinates to 2D turns those tests red;
+- two non-overlapping surfaces (the signature of mismatched coordinate systems)
+  producing an error that names the cause;
+- "busy" being distinguishable from "not running";
+- deviation statistics: RMSE about zero differs from standard deviation about the
+  mean when there is a bias.
 
-**13 phép thử live** (`CIVIL3D_LIVE_TEST=1`) dựng hai mặt phẳng song song cách nhau
-đúng 0,05 m trên diện 100 × 40 m, rồi đòi Civil 3D trả về đúng đáp số giải tích:
+The computation in `geometry.py` is tested against hand-computable values (a 3-4-5
+triangle, the RMSE of a symmetric series, the area of a square), never against
+reference values copied from a previous run.
 
-| Đại lượng | Đáp số tính tay | Civil 3D trả về |
+**The live suite** (`CIVIL3D_LIVE_TEST=1`) builds two parallel planes exactly 0.05 m
+apart over 100 × 40 m, then requires Civil 3D to return the analytic answer:
+
+| Quantity | By hand | Civil 3D returns |
 |---|---|---|
-| RMSE chênh cao độ so điểm kiểm tra | 0,050 m | 0,050 m |
-| Độ lệch chuẩn (chênh không đổi) | 0 | 0 |
-| Khối lượng đắp | 100 × 40 × 0,05 = 200 m³ | 200,000 m³ |
-| Độ dốc dọc trên mặt cắt | 0,020 | 0,020 |
-| Cao độ trắc dọc tại Km0+000 / +100 | 10,00 / 12,00 m | 10,00 / 12,00 m |
+| RMSE against check points | 0.050 m | 0.050 m |
+| Standard deviation (constant offset) | 0 | 0 |
+| Fill volume | 100 × 40 × 0.05 = 200 m³ | 200.000 m³ |
+| Longitudinal grade on the section | 0.020 | 0.020 |
+| Profile elevation at Km0+000 / +100 | 10.00 / 12.00 m | 10.00 / 12.00 m |
 
-"Chạy không lỗi" không phải tiêu chí: mọi bước phải ra đúng con số. Chính bộ thử này
-đã phát hiện toàn bộ tám khác biệt ở bảng trên.
+"It ran without an error" is not the criterion: every step has to produce the right
+number. This suite is what found all 16 API differences above.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for conventions and the checklist for adding
+a tool, and [CHANGELOG.md](CHANGELOG.md) for what changed between versions.
+
+---
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `/mcp` shows the server as not connected | Run `python install.py --check` |
+| `ModuleNotFoundError: mcp` or `win32com` | `pip install -r requirements.txt` |
+| Every tool says no session is running | Open Civil 3D, or call `launch_civil3d` (1–3 minutes) |
+| Tools report being attached to plain AutoCAD | Plain AutoCAD cannot serve these tools — start Civil 3D itself |
+| Creating a surface fails complaining about styles | The drawing is not from a Civil 3D template. Use `create_new_drawing` |
+| `Rebuild` fails with `0x80004005` | The assembly has a daylight subassembly and corridor targets cannot be set over COM — see limit 2 |
+| A comparison reports deviations of hundreds of metres | Mismatched coordinate systems; the error names the axis |
+| Garbled output running scripts by hand | Set `PYTHONIOENCODING=utf-8` first |
+
+---
+
+## Security
+
+This server hands a model direct control of the open drawing: it can delete
+surfaces, save over files, and send arbitrary AutoCAD commands. Read
+[SECURITY.md](SECURITY.md) before connecting it, and report vulnerabilities
+privately rather than in a public issue.
+
+---
+
+## License
+
+[MIT](LICENSE) — free for any use including commercial, keep the copyright notice.
+
+Contributions are welcome in English or Vietnamese — see
+[CONTRIBUTING.md](CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).

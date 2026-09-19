@@ -1,0 +1,96 @@
+name: Bug report
+description: Something does not work. / Báo lỗi.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Write in English or Vietnamese — both are fine. / Viết tiếng Anh hay tiếng Việt đều được.
+
+        Please check the **Known limits** section of the README first. Several
+        things this server cannot do are properties of Civil 3D's COM API rather
+        than bugs — creating assemblies from scratch, assigning corridor targets,
+        editing subassembly parameters, exporting LandXML.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which area?
+      options:
+        - Connection / launching Civil 3D
+        - Surfaces (TIN, volume, sampling, comparison)
+        - Alignments and profiles
+        - Corridors and cross sections
+        - Exporting data (CSV, reports)
+        - install.py / configuration
+        - Documentation
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you asked the model to do, and what the tool returned in full.
+      placeholder: |
+        I asked: "build a TIN surface from this point file"
+        The tool returned: {"ok": false, "error": "..."}
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations:
+      required: true
+
+  - type: textarea
+    id: connection
+    attributes:
+      label: Output of `check_civil3d_connection`
+      description: >
+        This distinguishes "not installed" from "not running" from "attached to
+        plain AutoCAD by mistake" — three problems with the same symptom.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: install-check
+    attributes:
+      label: Output of `python install.py --check`
+      render: text
+    validations:
+      required: true
+
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      placeholder: "Windows 11 23H2 · Python 3.12.4 · Civil 3D 2026 (COM 13.8) · Claude Code 2.x"
+    validations:
+      required: true
+
+  - type: textarea
+    id: drawing
+    attributes:
+      label: About the drawing
+      description: >
+        Output of `get_drawing_info` — the template it came from, `measurement`
+        and `drawing_units`. Please do not attach project drawings.
+      render: text
+
+  - type: checkboxes
+    id: preconditions
+    attributes:
+      label: Before submitting
+      options:
+        - label: The drawing was created from a Civil 3D template (a blank AutoCAD drawing has no styles and every create call will fail).
+          required: true
+        - label: I read the Known limits section and this is not one of them.
+          required: true
+        - label: I searched the existing issues.
+          required: true

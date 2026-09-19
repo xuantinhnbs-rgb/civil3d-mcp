@@ -134,9 +134,20 @@ class Civil3DClient:
     def _invoke(self, fn: Callable, args: tuple, kwargs: dict):
         """Chạy `fn(self, *args)` trên luồng COM, có thử lại và dịch lỗi.
 
-        An toàn để thử lại vì mọi thao tác ghi trong dự án này đều kiểm chứng hiệu
-        lực trước khi trả về, nên một lần chạy lại chỉ có thể lặp lại công việc chứ
-        không sinh ra đối tượng trùng lặp không phát hiện được.
+        Phép thử lại ở đây chạy lại TOÀN BỘ hàm nghiệp vụ, kể cả phần đã ghi xong.
+        Nó chỉ vô hại với các hàm chỉ đọc và với các hàm ghi mà bản thân thao tác
+        ghi là idempotent. Với một hàm TẠO đối tượng, nếu lời gọi tạo thành công rồi
+        mới có một lỗi tạm thời ở bước ĐỌC LẠI để kiểm chứng, lần chạy thứ hai sẽ
+        đụng chốt chống trùng tên và báo "bản vẽ đã có ..." - tức là báo thất bại
+        cho một thao tác vừa thành công. Đã đo được đúng tình huống này với
+        `create_volume_surface`: bề mặt lấy từ collection là giao diện gốc nên
+        `Statistics` ném AttributeError, AttributeError bị xếp vào nhóm tạm thời, và
+        hàm chạy lại.
+
+        Vì vậy quy tắc cho mọi hàm ghi đi qua đây: phần đọc lại để kiểm chứng KHÔNG
+        được phép ném lỗi tạm thời. Ép sẵn đối tượng về đúng giao diện, và bọc mọi
+        phép đọc kiểm chứng bằng `read_optional`/`_safe`, để lần chạy lại duy nhất
+        có thể xảy ra là lần mà thao tác ghi thật sự chưa chạy.
         """
         last: Optional[BaseException] = None
         revived = 0

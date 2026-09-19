@@ -1,13 +1,57 @@
+# Python
 __pycache__/
 *.py[cod]
-*$py.class
-.pytest_cache/
+*.egg-info/
 .venv/
 venv/
-env/
-*.egg-info/
-build/
-dist/
+
+# Cache cua cong cu phat trien
+.ruff_cache/
+.pytest_cache/
+
+# Cau hinh MCP chua duong dan tuyet doi cua tung may.
+# Chay "python install.py" de sinh lai. Ban mau: .mcp.json.example
+.mcp.json
+
+# Cache makepy cua pywin32 (sinh lai tu type library cua Civil 3D dang cai)
+gen_py/
+
+# File tam & ban luu
+*.bak
+*.log
+*.tmp
+
+# ---------------------------------------------------------------------------
+# Ban ve va du lieu cong trinh
+# ---------------------------------------------------------------------------
+# Mot ban ve Civil 3D la du lieu cua mot cong trinh co that, va file .dwg cua
+# corridor de len hang tram MB. Chan theo dinh dang chu khong theo ten file, vi
+# file moi lien tuc xuat hien trong luc lam viec.
+*.dwg
+*.dwt
+*.dws
+*.bak1
+*.sv$
+*.dwl
+*.dwl2
+*.xml.bak
+*.las
+*.laz
+*.xyz
+*.pts
+
+# LandXML: vua la dinh dang trao doi vua la du lieu thiet ke that.
+# Can commit mot file mau thi them ngoai le "!ten-file.xml" ben duoi.
+*.xml
+!.github/**/*.xml
+
+# Ket qua chay thu: CSV thong ke, bao cao Markdown, thu muc xuat.
+outputs/
+out/
+
+# Anh minh chung thi VAN phai vao git - do la vat chung trong tai lieu.
+!docs/images/*.png
+
+# Cau hinh editor rieng cua tung nguoi
 .vscode/
 .idea/
-*.log

@@ -32,12 +32,54 @@ SURFACE_TYPES = {1: "grid", 2: "TIN", 3: "grid volume", 4: "TIN volume"}
 _ABSENT = object()
 
 
+# Giao diện cụ thể tương ứng từng giá trị AeccSurfaceType. Collection `Surfaces`
+# trả về giao diện GỐC `IAeccSurface`, vốn KHÔNG có `Statistics` lẫn các thành viên
+# riêng của từng loại bề mặt. Đối tượng vừa tạo bằng `AddTinSurface` thì lại mang
+# đúng giao diện dẫn xuất, nên cùng một dòng code chạy được ngay sau khi tạo và
+# hỏng khi mở lại bản vẽ ở phiên sau.
+SURFACE_INTERFACES = {
+    1: "IAeccGridSurface",
+    2: "IAeccTinSurface",
+    3: "IAeccGridVolumeSurface",
+    4: "IAeccTinVolumeSurface",
+}
+
+
 def _surfaces(client: Civil3DClient):
     return client.aecc_doc.Surfaces
 
 
+def as_concrete_surface(surface):
+    """Ép bề mặt về đúng giao diện dẫn xuất theo chính `Type` của nó.
+
+    Phải chọn theo `Type`, KHÔNG được thử lần lượt từng giao diện: `CastTo` sang
+    một giao diện anh em vẫn THÀNH CÔNG (đo được: ép TIN surface sang
+    `IAeccTinVolumeSurface` trả về đối tượng bình thường), chỉ tới lúc đọc thành
+    viên mới hỏng bằng "Member not found". Vòng lặp thử-đến-khi-được vì vậy sẽ
+    chốt nhầm một phép ép sai mà tưởng là đã xong.
+
+    Ép không được thì trả lại nguyên đối tượng: trên bề mặt vừa tạo, giao diện
+    dẫn xuất đã đúng sẵn và `CastTo` là thừa.
+    """
+    kind = _safe_int(surface, "Type")
+    iface = SURFACE_INTERFACES.get(kind)
+    if not iface:
+        return surface
+    try:
+        from win32com.client import CastTo
+    except Exception:
+        return surface
+    try:
+        cast = CastTo(surface, iface)
+    except Exception as exc:
+        reraise_if_transient(exc)
+        return surface
+    return cast if cast is not None else surface
+
+
 def get_surface(client: Civil3DClient, name: str):
-    return Civil3DClient.find_item(_surfaces(client), name, "bề mặt (surface)")
+    return as_concrete_surface(
+        Civil3DClient.find_item(_surfaces(client), name, "bề mặt (surface)"))
 
 
 def _statistics(surface) -> Dict[str, object]:
@@ -104,7 +146,7 @@ def list_surfaces(client: Civil3DClient, with_statistics: bool = False) -> Dict[
     coll = _surfaces(client)
     items: List[Dict[str, object]] = []
     for i in range(int(coll.Count)):
-        surface = coll.Item(i)
+        surface = as_concrete_surface(coll.Item(i))
         entry: Dict[str, object] = {
             "index": i,
             "name": str(surface.Name),
@@ -256,7 +298,13 @@ def create_volume_surface(client: Civil3DClient, name: str, base_surface: str,
     data.ComparisonSurface = comp
     coll.AddTinVolumeSurface(data)
 
-    surface = Civil3DClient.find_item(coll, name, "bề mặt")
+    # Phải ép về giao diện dẫn xuất ở ĐÂY nữa, không chỉ trong get_surface: bề mặt
+    # lấy thẳng từ collection là giao diện gốc, nên `Statistics` ném AttributeError.
+    # Hậu quả không dừng ở một lời gọi đọc hỏng - AttributeError được lớp gọi coi là
+    # lỗi tạm thời và cho chạy lại CẢ hàm này, mà volume surface thì đã tạo xong ở
+    # dòng trên, nên lần chạy lại đụng chốt trùng tên và báo "bản vẽ đã có bề mặt
+    # tên X" cho một thao tác vừa thành công.
+    surface = as_concrete_surface(Civil3DClient.find_item(coll, name, "bề mặt"))
     volumes = _volume_statistics(surface)
     out: Dict[str, object] = {
         "created": name,
